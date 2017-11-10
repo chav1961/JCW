@@ -1,4 +1,4 @@
-package jcw;
+package chav1961.jcw;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map.Entry;
@@ -19,10 +20,10 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.RAMDirectory;
 
-import jcw.exceptions.CommandLineParametersException;
-import jcw.screen.MainFrame;
+import chav1961.jcw.exceptions.CommandLineParametersException;
+import chav1961.jcw.screen.MainFrame;
 
-public class Applicaiton {
+public class Application {
 	static final String	CAPTION = "??????";
 	
 	static final String	KEY_INDEX = "index";
@@ -73,7 +74,7 @@ public class Applicaiton {
 		for (Entry<Object, Object> item : props.entrySet()) {
 			switch (item.getKey().toString()) {
 				case KEY_INDEX		:
-					if (item.getValue() != null) {
+					if (item.getValue() != null && !item.getValue().toString().isEmpty()) {
 						final File		f = new File(item.getValue().toString());
 						final String	checkError = checkLuceneDir(f);
 						
@@ -90,7 +91,7 @@ public class Applicaiton {
 					}
 					break;
 				case KEY_CROWLING	:
-					if (item.getValue() != null) {
+					if (item.getValue() != null && !item.getValue().toString().isEmpty()) {
 						final String[]	list = item.getValue().toString().split("\\;");
 						final List<URI>	uris = new ArrayList<>();	
 						final Set<URI>	alreadyTyped = new HashSet<>();
@@ -113,9 +114,16 @@ public class Applicaiton {
 					}
 					break;
 				case KEY_REFRESH	:
-					try{parm.refresh = Boolean.valueOf(item.getValue() == null ? "false" : item.getValue().toString());
-					} catch (IllegalArgumentException exc) {
-						throw new CommandLineParametersException("Illegal boolean value ["+item.getValue()+"] for ["+KEY_REFRESH+"] key in the configuration file");
+					if (item.getValue() == null) {
+						parm.refresh = false;
+					}
+					else {
+						switch (item.getValue().toString()) {
+							case "false"	: parm.refresh = false; break;
+							case "true" 	: parm.refresh = true; break;
+							case "" 		: throw new CommandLineParametersException("Boolean value for ["+KEY_REFRESH+"] key is not typed in the configuration file");
+							default 		: throw new CommandLineParametersException("Illegal boolean value ["+item.getValue()+"] for ["+KEY_REFRESH+"] key in the configuration file");
+						}
 					}
 					break;
 				default :
@@ -308,8 +316,7 @@ public class Applicaiton {
 			final MainFrame			frame = new MainFrame(CAPTION,index,analyzer);
 
 			if (parm.refresh || parm.inMemory) {
-				frame.buildIndex(new File("d:/JCW"
-						+ ""));
+				frame.buildIndex(new File("d:/JCW"));
 			}
 		} catch (CommandLineParametersException exc) {
 			System.err.println(exc.getMessage());
@@ -325,5 +332,41 @@ public class Applicaiton {
 		URI[]		crowlingDir = null;
 		boolean		refresh = false;
 		boolean		screen = true;
+		
+		@Override
+		public String toString() {
+			return "Parameters [inMemory=" + inMemory + ", luceneDir=" + luceneDir + ", crowling=" + crowling + ", crowlingDir=" + Arrays.toString(crowlingDir) + ", refresh=" + refresh + ", screen=" + screen + "]";
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			
+			result = prime * result + (crowling ? 1231 : 1237);
+			result = prime * result + Arrays.hashCode(crowlingDir);
+			result = prime * result + (inMemory ? 1231 : 1237);
+			result = prime * result + ((luceneDir == null) ? 0 : luceneDir.hashCode());
+			result = prime * result + (refresh ? 1231 : 1237);
+			result = prime * result + (screen ? 1231 : 1237);
+			return result;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj) return true;
+			if (obj == null) return false;
+			if (getClass() != obj.getClass()) return false;
+			Parameters other = (Parameters) obj;
+			if (crowling != other.crowling) return false;
+			if (!Arrays.equals(crowlingDir, other.crowlingDir)) return false;
+			if (inMemory != other.inMemory) return false;
+			if (luceneDir == null) {
+				if (other.luceneDir != null) return false;
+			} else if (!luceneDir.equals(other.luceneDir)) return false;
+			if (refresh != other.refresh) return false;
+			if (screen != other.screen) return false;
+			return true;
+		}
 	}
 }

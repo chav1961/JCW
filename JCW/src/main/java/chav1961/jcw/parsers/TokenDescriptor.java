@@ -1,4 +1,4 @@
-package jcw.parsers;
+package chav1961.jcw.parsers;
 
 public class TokenDescriptor<T extends Enum<?>> {
 	public T		tokenSort;

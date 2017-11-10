@@ -1,4 +1,4 @@
-package jcw.util;
+package chav1961.jcw.util;
 
 import java.io.BufferedReader;
 import java.io.IOException;

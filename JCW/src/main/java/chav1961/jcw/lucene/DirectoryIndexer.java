@@ -1,4 +1,4 @@
-package jcw.lucene;
+package chav1961.jcw.lucene;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -12,8 +12,8 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.Directory;
 
-import jcw.util.Utils;
-import jcw.interfaces.IMessagePrinter;
+import chav1961.jcw.interfaces.IMessagePrinter;
+import chav1961.jcw.util.Utils;
 
 public class DirectoryIndexer {
 	private final Directory			luceneDir;

@@ -1,4 +1,4 @@
-package jcw.screen;
+package chav1961.jcw.screen;
 
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -44,10 +44,10 @@ import javax.swing.event.HyperlinkListener;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.store.Directory;
 
-import jcw.lucene.DirectoryIndexer;
-import jcw.lucene.DirectorySearcher;
-import jcw.lucene.DirectorySearcher.URIAndScore;
-import jcw.util.Utils;
+import chav1961.jcw.lucene.DirectoryIndexer;
+import chav1961.jcw.lucene.DirectorySearcher;
+import chav1961.jcw.lucene.DirectorySearcher.URIAndScore;
+import chav1961.jcw.util.Utils;
 
 public class MainFrame extends JFrame {
 	private static final long serialVersionUID = -6792354393497736416L;

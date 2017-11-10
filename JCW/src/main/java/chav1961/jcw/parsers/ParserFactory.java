@@ -1,9 +1,9 @@
-package jcw.parsers;
+package chav1961.jcw.parsers;
 
 import java.io.InputStream;
 import java.io.Reader;
 
-import jcw.interfaces.ContentSort;
+import chav1961.jcw.interfaces.ContentSort;
 
 public class ParserFactory {
 

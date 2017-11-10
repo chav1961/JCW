@@ -1,4 +1,4 @@
-package jcw.lucene;
+package chav1961.jcw.lucene;
 
 import java.io.IOException;
 import java.net.URI;

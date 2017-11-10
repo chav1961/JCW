@@ -1,4 +1,4 @@
-package jcw.interfaces;
+package chav1961.jcw.interfaces;
 
 public enum TokenSort {
 	WHITESPACE,

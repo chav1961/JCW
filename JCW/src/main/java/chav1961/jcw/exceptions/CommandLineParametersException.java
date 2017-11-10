@@ -1,4 +1,4 @@
-package jcw.exceptions;
+package chav1961.jcw.exceptions;
 
 public class CommandLineParametersException extends Exception {
 	private static final long serialVersionUID = -1146095723752754080L;

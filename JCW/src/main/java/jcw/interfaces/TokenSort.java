@@ -1,10 +1,11 @@
-package chav1961.jcw.interfaces;
+package jcw.interfaces;
 
 public enum TokenSort {
 	WHITESPACE,
 	COMMENT,
 	DOCCONTENT,
 	KEYWORD,
+	RESERVEDKEYWORD,
 	PREPROCESSOR,
 	ANNOTATION,
 	PUNCTUATION,

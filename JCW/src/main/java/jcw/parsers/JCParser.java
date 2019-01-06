@@ -1,4 +1,4 @@
-package chav1961.jcw.parsers;
+package jcw.parsers;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-import chav1961.jcw.interfaces.TokenSort;
+import jcw.interfaces.TokenSort;
 
 class JCParser implements Iterable<TokenDescriptor<TokenSort>> {
 	private static final int		TYPICAL_CONTENT_SIZE = 65536;

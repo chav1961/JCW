@@ -14,6 +14,7 @@ import chav1961.jcw.interfaces.TokenSort;
 import chav1961.purelib.basic.AndOrTree;
 import chav1961.purelib.basic.BitCharSet;
 import chav1961.purelib.basic.CharUtils;
+import chav1961.purelib.basic.exceptions.SyntaxException;
 import chav1961.purelib.basic.interfaces.SyntaxTreeInterface;
 
 class JavaCodeParser implements Iterable<TokenDescriptor<TokenSort>> {
@@ -220,10 +221,17 @@ class JavaCodeParser implements Iterable<TokenDescriptor<TokenSort>> {
 							}
 							break;
 						case '0' : 	case '1' : case '2' : case '3' : case '4' : case '5' : case '6' : case '7' : case '8' : case '9' : // Numeric constants
-							int		next1 = CharUtils.parseNumber(tmp,pos,forLong,CharUtils.PREF_ANY,false), next2 = CharUtils.parseLongExtended(tmp,pos,forLong,false); 
+							try{int 	next1, next2;
 							
-							token.tokenSort = TokenSort.NUMCONSTANT;
-							pos = Math.max(next1,next2);
+								next1 = CharUtils.parseNumber(tmp,pos,forLong,CharUtils.PREF_ANY,false);
+								next2 = CharUtils.parseLongExtended(tmp,pos,forLong,false);
+								token.tokenSort = TokenSort.NUMCONSTANT;
+								pos = Math.max(next1,next2);
+							} catch (SyntaxException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+							} 
+							
 							break;
 						default :
 							if (Character.isJavaIdentifierStart(tmp[pos])) {

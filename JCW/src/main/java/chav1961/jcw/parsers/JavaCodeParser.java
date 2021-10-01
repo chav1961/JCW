@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -14,16 +15,14 @@ import chav1961.jcw.interfaces.TokenSort;
 import chav1961.purelib.basic.AndOrTree;
 import chav1961.purelib.basic.BitCharSet;
 import chav1961.purelib.basic.CharUtils;
+import chav1961.purelib.basic.LineByLineProcessor;
 import chav1961.purelib.basic.exceptions.SyntaxException;
 import chav1961.purelib.basic.interfaces.SyntaxTreeInterface;
 
-class JavaCodeParser implements Iterable<TokenDescriptor<TokenSort>> {
-	private static final int			TYPICAL_CONTENT_SIZE = 65536;
+public class JavaCodeParser implements Iterable<TokenDescriptor<TokenSort>> {
 	
 	private static final SyntaxTreeInterface<TokenSort>	WORDS = new AndOrTree<>();	
-    private static final BitCharSet		EOL = new BitCharSet("\n\0");
-	private static final BitCharSet		BLANKS = new BitCharSet(" \n\r\f\t");
-	private static final BitCharSet		SEPARATORS = new BitCharSet("(){}[];,.");
+	private static final BitCharSet		SEPARATORS = new BitCharSet("(){}[];,.:");
 	private static final BitCharSet		OPERATORS = new BitCharSet("=><!~?:&|+-*/^%");
 	
 	static {
@@ -57,208 +56,69 @@ class JavaCodeParser implements Iterable<TokenDescriptor<TokenSort>> {
 		WORDS.placeName("true",TokenSort.SPECIALCONSTANT);
 	}
 	
-	private final char[]			content;
-	private volatile boolean		finished = false;
+	private final List<TokenDescriptor<TokenSort>>	tokens = new ArrayList<>();
+	private boolean		insideComment = false;
 
-	JavaCodeParser(final InputStream is) throws IOException {
-		this(is,TYPICAL_CONTENT_SIZE);
-	}
-	
-	JavaCodeParser(final InputStream is, final int typicalContentLength) throws IOException {
-		if (is == null) {
-			throw new IllegalArgumentException("Input stream can't be null");
-		}
-		else if (typicalContentLength < 1024) {
-			throw new IllegalArgumentException("Typical content length ["+typicalContentLength+"] is too small. Need be at least 1024");
-		}
-		else {
-			try(final Reader	rdr = new InputStreamReader(is)) {
-				this.content = ParserFactory.loadContent(rdr,typicalContentLength);
-			}
-		}
-	}
-
-	JavaCodeParser(final Reader rdr) throws IOException {
-		this(rdr,TYPICAL_CONTENT_SIZE);
-	}
-	
-	JavaCodeParser(final Reader rdr, final int typicalContentLength) throws IOException {
+	public JavaCodeParser(final Reader rdr) throws IOException, SyntaxException {
 		if (rdr == null) {
-			throw new IllegalArgumentException("Input stream reader can't be null");
-		}
-		else if (typicalContentLength < 1024) {
-			throw new IllegalArgumentException("Typical content length ["+typicalContentLength+"] is too small. Need be at least 1024");
+			throw new NullPointerException("Input stream can't be null");
 		}
 		else {
-			this.content = ParserFactory.loadContent(rdr,typicalContentLength);
+			try(final LineByLineProcessor	lblp = new LineByLineProcessor((displacement, lineNo, data, from, length)->processLine(displacement, lineNo, data, from, length, tokens))) {
+				lblp.write(rdr);
+			}
 		}
 	}
 	
 	@Override
 	public Iterator<TokenDescriptor<TokenSort>> iterator() {
-		if (finished) {
-			throw new IllegalStateException("Can't create iterator on the stream already processed");
-		}
-		else {
-			finished = true;
+		return tokens.iterator();
+	}
+	
+	void processLine(final long displacement, final int lineNo, final char[] data, int from, final int length, final List<TokenDescriptor<TokenSort>> tokens) throws IOException, SyntaxException {
+		final int	start = from;
+		
+		while (data[from] != '\n') {
+			from = CharUtils.skipBlank(data, from, true);
 			
-			return new Iterator<TokenDescriptor<TokenSort>>(){
-				final TokenDescriptor<TokenSort>	token = new TokenDescriptor<TokenSort>();
-				final StringBuilder					sb = new StringBuilder();
-				final long[]						forLong = new long[2];
-				
-				int			pos = 0;
-				
-				@Override
-				public boolean hasNext() {
-					return content[pos] != 0;
+			if (insideComment) {
+				if (data[from] == '*' && data[from+1] == '/') {
+					from += 2;
+					insideComment = false;
 				}
-
-				@Override
-				public TokenDescriptor<TokenSort> next() {
-					final char[]	tmp = content;
-					
-					token.tokenContent = tmp;
-					token.fromToken = pos;
-					
-					switch (tmp[pos]) {
-						case ' ' : case '\n' : case '\r' : case '\f' : case '\t' :		// Whitespace
-							token.tokenSort = TokenSort.WHITESPACE;
-							while (BLANKS.contains(tmp[pos])) {
-								pos++;
-							}
-							break;
-						case '(' : case ')' : case '{' : case '}' : case '[' : case ']' : case ';' : case ',' : case '.' :	// Separators
-							token.tokenSort = TokenSort.PUNCTUATION;
-							while (SEPARATORS.contains(tmp[pos])) {
-								pos++;
-							}
-							break;
-						case '/' :	// Comments or operators
-							if (tmp[pos+1] == '/') {
-								token.tokenSort = TokenSort.COMMENT;
-								while (!EOL.contains(tmp[pos])) {
-									pos++;
-								}
-								if (tmp[pos] == '\n') {
-									pos++;
-								}
-								break;
-							}
-							else if (tmp[pos+1] == '*') {
-								if (tmp[pos+2] == '*') {
-									pos += 3;
-									token.tokenSort = TokenSort.DOCCONTENT;
-									while (tmp[pos] != 0 && !(tmp[pos-1] == '*' && tmp[pos] == '/')) {
-										pos++;
-									}
-								}
-								else {
-									pos += 2;
-									token.tokenSort = TokenSort.COMMENT;
-									while (tmp[pos] != 0 && !(tmp[pos-1] == '*' && tmp[pos] == '/')) {
-										pos++;
-									}
-								}
-								if (tmp[pos] == '/') {
-									pos++;
-								}
-								break;
-							}
-						case '=' : case '>' : case '<' : case '!' : case '~' : case '?' : case ':' : case '&' : case '|' :	// Operators 
-						case '+' : case '-' : case '*' : case '^' : case '%' :
-							token.tokenSort = TokenSort.OPERATORS;
-							while (OPERATORS.contains(tmp[pos])) {
-								pos++;
-							}
-							break;
-						case '\'' :	// Chars
-							token.tokenSort = TokenSort.TEXTCONSTANT;
-							pos = CharUtils.parseStringExtended(tmp,pos+1,'\'',sb);
-							sb.setLength(0);
-							break;
-						case '\"' : // Strings
-							token.tokenSort = TokenSort.TEXTCONSTANT;
-							pos = CharUtils.parseStringExtended(tmp,pos+1,'\"',sb);
-							sb.setLength(0);
-							break;
-						case '@' : 	// Annotations
-							token.tokenSort = TokenSort.ANNOTATION;
-							pos++;
-							while (BLANKS.contains(tmp[pos])) {
-								pos++;
-							}
-							while (Character.isJavaIdentifierPart(content[pos])) {
-								pos++;
-							}
-							while (BLANKS.contains(tmp[pos])) {
-								pos++;
-							}
-							if (tmp[pos] == '(') {	// Skip expression brackets
-								int	depth = 1;
-								
-								pos++;
-								while (tmp[pos] != 0 && depth > 0) {
-									switch (tmp[pos]) {
-										case '{' : case '(' : case '[' : 
-											depth++; 	pos++; 
-											break;
-										case '}' : case ')' : case ']' :
-											depth--; 	pos++; 
-											break;
-										case '\'' :
-											pos = CharUtils.parseString(tmp,pos+1,'\'',sb);
-											sb.setLength(0);
-											break;
-										case '\"' :
-											pos = CharUtils.parseString(tmp,pos+1,'\"',sb);
-											sb.setLength(0);
-											break;
-										default :
-											pos++;
-									}
-								}
-							}
-							break;
-						case '0' : 	case '1' : case '2' : case '3' : case '4' : case '5' : case '6' : case '7' : case '8' : case '9' : // Numeric constants
-							try{int 	next1, next2;
-							
-								next1 = CharUtils.parseNumber(tmp,pos,forLong,CharUtils.PREF_ANY,false);
-								next2 = CharUtils.parseLongExtended(tmp,pos,forLong,false);
-								token.tokenSort = TokenSort.NUMCONSTANT;
-								pos = Math.max(next1,next2);
-							} catch (SyntaxException e) {
-								// TODO Auto-generated catch block
-								e.printStackTrace();
-							} 
-							
-							break;
-						default :
-							if (Character.isJavaIdentifierStart(tmp[pos])) {
-								token.tokenSort = TokenSort.IDENTIFIER;
-								while (tmp[pos] != 0 && Character.isJavaIdentifierPart(tmp[pos])) {
-									pos++;
-								}
-							}
-							else {
-								token.tokenSort = TokenSort.UNCLASSIFIED;
-								pos++;
-							}
-							break;
+			}
+			else {
+				if (data[from] == '/' && data[from+1] == '/') {
+					return;
+				}
+				if (data[from] == '/' && data[from+1] == '*') {
+					from += 2;
+					insideComment = true;
+				}
+				else {
+					while (SEPARATORS.contains(data[from])) {
+						from++;
 					}
-					token.toToken = pos;
-					
-					if (token.tokenSort == TokenSort.IDENTIFIER) {	// Test reserved words and special constants
-						final long	id = WORDS.seekName(token.tokenContent, token.fromToken, token.toToken);
+					while (OPERATORS.contains(data[from])) {
+						from++;
+					}
+					while (Character.isDigit(data[from])) {
+						from++;
+					}
+					if (Character.isJavaIdentifierStart(data[from])) {
+						int	begin = from;
 						
-						if (id > 0) {
-							token.tokenSort = WORDS.getCargo(id);
+						while (Character.isJavaIdentifierPart(data[from])) {
+							from++;
+						}
+						if (WORDS.seekName(data, begin, from) < 0) {
+							final char[]	content = Arrays.copyOfRange(data, begin, from);
+							
+							tokens.add(new TokenDescriptor<TokenSort>(TokenSort.IDENTIFIER, content, (int)(displacement + (begin - start)), (int)(displacement + (from - start))));
 						}
 					}
-					
-					return token;
 				}
-			};
-		}		
+			}
+		}
 	}
 }

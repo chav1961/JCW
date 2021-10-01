@@ -1,372 +1,273 @@
 package chav1961.jcw;
 
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.RAMDirectory;
+import org.apache.lucene.store.MMapDirectory;
 
-import chav1961.jcw.screen.MainFrame;
+import chav1961.bt.lucenewrapper.LuceneSearchRepository;
+import chav1961.bt.lucenewrapper.interfaces.Document2Save;
+import chav1961.bt.lucenewrapper.interfaces.SearchRepository.SearchRepositoryTransaction;
+import chav1961.bt.lucenewrapper.interfaces.SearchRepositoryException;
+import chav1961.bt.lucenewrapper.interfaces.SearchableDocument;
+import chav1961.purelib.basic.ArgParser;
+import chav1961.purelib.basic.PureLibSettings;
+import chav1961.purelib.basic.Utils;
 import chav1961.purelib.basic.exceptions.CommandLineParametersException;
+import chav1961.purelib.basic.exceptions.SyntaxException;
 
 public class Application {
 	static final String	CAPTION = "??????";
 	
+	static final String	KEY_CONF = "conf";
 	static final String	KEY_INDEX = "index";
+	static final String	KEY_NOCROWLING = "nocrowling";
 	static final String	KEY_CROWLING = "crowling";
-	static final String	KEY_REFRESH = "refresh";
+	static final String	KEY_APPEND = "append";
+	static final String	KEY_NOSCREEN = "noscreen";
+	static final String	KEY_HELP = "help";
 
-	static final String	PARM_CONF = "-conf";
-	static final String	PARM_INDEX = '-'+KEY_INDEX;
-	static final String	PARM_CROWLING = '-'+KEY_CROWLING;
-	static final String	PARM_CROWLING_ADD = '+'+KEY_CROWLING;
-	static final String	PARM_NOCROWLING = "-no"+KEY_CROWLING;
-	static final String	PARM_REFRESH = '-'+KEY_REFRESH;
-	static final String	PARM_NOSCREEN = "-noscreen";
-	static final String	PARM_HELP = "-help";
-	
-	static void printUsage() {
-		System.err.println("Usage: jcw.jar [-conf <config_file>] [-index <lucene_index_dir>] [-nocrowling] [{-|+}crowling <URI_list_to_crowl>] [-refresh] [-noscreen] [-help]");
-		System.err.println("\t -nocrowling - reject crowling independently to '-conf' definitions");
-		System.err.println("\t -refresh - refresh existent index");
-		System.err.println("\t -noscreen - index data only, but not show screen");
-		System.err.println("Key '-crowling' crowls only location(s) typed, key '+crowling' crowls location(s) typed additionally to '-conf' definitions");
+	static boolean checkParameters(final ArgParser parser) throws CommandLineParametersException {
+		if (parser.getValue(KEY_NOCROWLING, boolean.class) && parser.getValue(KEY_NOSCREEN, boolean.class) && !parser.isTyped(KEY_HELP)) {
+			throw new CommandLineParametersException("Neither crowling nor screen in the parameters");
+		}
+		
+		if (parser.isTyped(KEY_INDEX)) {
+			final File	file = parser.getValue(KEY_INDEX, File.class);
+			
+			if (file.exists() && file.isFile()) {
+				throw new CommandLineParametersException("["+KEY_INDEX+"] parameter locates to file, not directory");
+			}
+			else if (!file.exists()) {
+				if (!file.mkdirs()) {
+					throw new CommandLineParametersException("["+KEY_INDEX+"] error: can't create directory ["+file.getAbsolutePath()+"]");
+				}
+			}
+		}
+		
+		if (parser.isTyped(KEY_CROWLING) && parser.isTyped(KEY_APPEND)) {
+			throw new CommandLineParametersException("Mutually exclusive parameters ["+KEY_CROWLING+"] and ["+KEY_APPEND+"]");
+		}
+		
+		final StringBuilder	sb = new StringBuilder();
+		
+		for (String item : parser.getValue(KEY_CROWLING, String[].class)) {
+			final File	file = new File(item);
+			
+			if (!file.exists() || !file.canRead()) {
+				sb.append(' ').append(file.getAbsolutePath());
+			}
+		}
+		for (String item : parser.getValue(KEY_APPEND, String[].class)) {
+			final File	file = new File(item);
+			
+			if (!file.exists() || !file.canRead()) {
+				sb.append(' ').append(file.getAbsolutePath());
+			}
+		}
+		
+		if (!sb.isEmpty()) {
+			throw new CommandLineParametersException("Some directories/files in the ["+KEY_CROWLING+"]/["+KEY_APPEND+"] list don't exist or not accessible: ["+sb+"]");
+		}
+		
+		if (parser.isTyped(KEY_HELP)) {
+			printUsage();
+		}
+		return true;
 	}
 	
-	static String checkLuceneDir(final File luceneDir) {
-		if (!luceneDir.exists()) {
-			if (!luceneDir.mkdirs()) {
-				return "Lucene index directory ["+luceneDir.getAbsolutePath()+"] is not exists and can be created!";
+	static void appendContent(final LuceneSearchRepository lsr, final String[] filesAndDirs, final boolean checkReplacement) throws IOException, SearchRepositoryException {
+		final List<Document2Save>		docs = new ArrayList<>();
+		final Map<String, NameAndId>	replacements = new HashMap<>();
+		
+		for (String item : filesAndDirs) {
+			createDocument(new File(item), docs);
+		}
+		if (!docs.isEmpty()) {
+			if (checkReplacement) {
+				for (Document2Save item : docs) {
+					final String	title = item.getTitle();
+					
+					try{
+						for (SearchableDocument found : lsr.seekDocuments(title, 1)) {
+							replacements.put(title, new NameAndId(title, found.getId()));
+						}
+					} catch (SyntaxException e) {
+					}
+				}
+			}
+			
+			try(SearchRepositoryTransaction	srt = lsr.startTransaction()) {
+				for (Document2Save item : docs) {
+					if (replacements.containsKey(item.getTitle())) {
+						srt.replaceDocument(replacements.get(item.getTitle()).id, item);
+					}
+					else {
+						srt.addDocument(item);
+					}
+				}
+				srt.commit();
+			} catch (SyntaxException e) {
+			}
+		}
+	}
+
+	private static void printUsage() {
+		System.err.println("Usage: jcw.jar [-conf <config_file>] [-index <lucene_index_dir>] [-nocrowling] [-crowling <URI_list_to_crowl>] [-append <URI_list_to_crowl>] [-noscreen] [-help]");
+		System.err.println("\t -conf - get parameters from configuration file");
+		System.err.println("\t -index - location of lucene index directory. If missing, in-memory index will be used");
+		System.err.println("\t -nocrowling - reject crowling independently to '-conf' definitions");
+		System.err.println("\t -crowling - create index and crowling data to it");
+		System.err.println("\t -append - append cdata crowledto existent index");
+		System.err.println("\t -noscreen - index data only, but not show screen");
+	}
+	
+	private static void createDocument(final File source, final List<Document2Save> docs) throws IOException {
+		if (source.exists()) {
+			if (source.isFile()) {
+				try(final Reader		rdr = new FileReader(source, Charset.forName(PureLibSettings.DEFAULT_CONTENT_ENCODING))) {
+					final Document2Save	d2s = parseDocument(rdr); 
+					
+					if (d2s != null) {
+						docs.add(d2s);
+					}
+				}
 			}
 			else {
-				return null;
+				for (File f : source.listFiles()) {
+					createDocument(f, docs);
+				}
 			}
-		}
-		else if (luceneDir.isFile()) {
-			return "Lucene index location ["+luceneDir.getAbsolutePath()+"] is a file, not directory!";
-		}
-		else if (!luceneDir.canWrite() || !luceneDir.canRead()) {
-			return "Lucene index directory ["+luceneDir.getAbsolutePath()+"] is not accessible for reading and/or writing!";
-		}
-		else {
-			return null;
 		}
 	}
 	
-	static void fillParameters(final InputStream is, final Parameters parm) throws IOException, CommandLineParametersException {
-		final Properties	props = new Properties();
+	private static Document2Save parseDocument(final Reader rdr) {
+		return null;
+	}
+
+	private static void showContent(final LuceneSearchRepository lsr) {
+		// TODO Auto-generated method stub
 		
-		props.load(is);
-		for (Entry<Object, Object> item : props.entrySet()) {
-			switch (item.getKey().toString()) {
-				case KEY_INDEX		:
-					if (item.getValue() != null && !item.getValue().toString().isEmpty()) {
-						final File		f = new File(item.getValue().toString());
-						final String	checkError = checkLuceneDir(f);
-						
-						if (checkError != null) {
-							throw new CommandLineParametersException(checkError);
-						}
-						else {
-							parm.luceneDir = f;
-							parm.inMemory = false;
-						}
-					}
-					else {
-						throw new CommandLineParametersException("Illegal file name value ["+item.getValue()+"] for ["+KEY_INDEX+"] key in the configuration file");
-					}
-					break;
-				case KEY_CROWLING	:
-					if (item.getValue() != null && !item.getValue().toString().isEmpty()) {
-						final String[]	list = item.getValue().toString().split("\\;");
-						final List<URI>	uris = new ArrayList<>();	
-						final Set<URI>	alreadyTyped = new HashSet<>();
-						
-						for (int uriIndex = 0; uriIndex < list.length; uriIndex++) {
-							try{final URI	newUri = URI.create(list[uriIndex]); 
-								
-								if (!alreadyTyped.contains(newUri)) {
-									uris.add(newUri);
-								}
-								alreadyTyped.add(newUri);
-							} catch (IllegalArgumentException exc) {
-								throw new CommandLineParametersException("URI to crowl ["+list[uriIndex]+"] has invalid format!");
-							}
-						}
-						parm.crowlingDir = uris.toArray(new URI[uris.size()]);
-					}
-					else {
-						throw new CommandLineParametersException("Illegal file name value ["+item.getValue()+"] for ["+KEY_CROWLING+"] key in the configuration file");
-					}
-					break;
-				case KEY_REFRESH	:
-					if (item.getValue() == null) {
-						parm.refresh = false;
-					}
-					else {
-						switch (item.getValue().toString()) {
-							case "false"	: parm.refresh = false; break;
-							case "true" 	: parm.refresh = true; break;
-							case "" 		: throw new CommandLineParametersException("Boolean value for ["+KEY_REFRESH+"] key is not typed in the configuration file");
-							default 		: throw new CommandLineParametersException("Illegal boolean value ["+item.getValue()+"] for ["+KEY_REFRESH+"] key in the configuration file");
-						}
-					}
-					break;
-				default :
-					throw new CommandLineParametersException("Unknown key ["+item.getKey()+"] in the configuration file");
-			}
-			
-		}
 	}
 	
-	static Parameters parseParameters(final String[] args) throws CommandLineParametersException {
-		final Parameters	parm = new Parameters();
-		
-		if (args.length == 0) {
-			return parm;
+	private static Directory getLuceneDir(final ArgParser parser) throws CommandLineParametersException, IOException {
+		if (parser.isTyped(KEY_INDEX)) {
+			return FSDirectory.open(parser.getValue(KEY_INDEX, File.class).toPath());
 		}
 		else {
-			boolean				conf = false, luceneIndex = false, crowling = false, noCrowling = false, refresh = false, noScreen = false;
-			
-			for (int index = 0; index < args.length; index++) {
-				switch (args[index]) {
-					case PARM_CONF			:
-						if (!conf) {
-							conf = true;
-							if (index < args.length - 1) {
-								final File	f = new File(args[index+1]);
-								
-								try(final InputStream	is = new FileInputStream(f)) {
-									
-									fillParameters(is,parm);
-								} catch (FileNotFoundException e) {
-									throw new CommandLineParametersException("Configuration file ["+f.getAbsolutePath()+"] not found or is not accessible");
-								} catch (IOException e) {
-									throw new CommandLineParametersException("Error reading configuration file ["+f.getAbsolutePath()+"]: "+e.getMessage());
-								}
-							}
-							else {
-								throw new CommandLineParametersException("File name is missing for '-conf' key!");
-							}
-						}
-						else {
-							throw new CommandLineParametersException("Duplicate '-conf' key!");
-						}
-						break;
-					case PARM_INDEX			:
-						if (!luceneIndex) {
-							luceneIndex = true;
-						}
-						else {
-							throw new CommandLineParametersException("Duplicate '-index' key!");
-						}
-						break;
-					case PARM_CROWLING		:
-					case PARM_CROWLING_ADD	:
-						if (!crowling) {
-							crowling = true;
-						}
-						else {
-							throw new CommandLineParametersException("Duplicate '-crowling'/'+crowling' key!");
-						}
-						break;
-					case PARM_NOCROWLING	:
-						if (!noCrowling) {
-							noCrowling = true;
-						}
-						else {
-							throw new CommandLineParametersException("Duplicate '-nocrowling' key!");
-						}
-						break;
-					case PARM_REFRESH		:
-						if (!refresh) {
-							refresh = true;
-						}
-						else {
-							throw new CommandLineParametersException("Duplicate '-refresh' key!");
-						}
-						break;
-					case PARM_NOSCREEN		:
-						if (!noScreen) {
-							noScreen = true;
-						}
-						else {
-							throw new CommandLineParametersException("Duplicate '-noscreen' key!");
-						}
-						break;
-					default :
-						break;
-				}
-				if (crowling && noCrowling) {
-					throw new CommandLineParametersException("Both '-crowling'/'+crowling' and '-nocrowling' keys were typed! The keys are mutually exclusive");
-				}
-			}
-			
-			boolean		expandCrowlingList = false;
-			
-			for (int index = 0; index < args.length; index++) {
-				switch (args[index]) {
-					case PARM_CONF		:
-						index++;	// Skip file name
-						break;
-					case PARM_INDEX		:
-						if (index < args.length - 1) {
-							final File		f = new File(args[index+1]);
-							final String	checkError = checkLuceneDir(f);
-							
-							if (checkError != null) {
-								throw new CommandLineParametersException(checkError);
-							}
-							else {
-								parm.luceneDir = f;
-								parm.inMemory = false;
-							}
-							index++;
-						}
-						else {
-							throw new CommandLineParametersException("Directory name is missing for '-index' key!");
-						}
-						break;
-					case PARM_CROWLING_ADD	:
-						expandCrowlingList = true;
-					case PARM_CROWLING	:
-						if (index < args.length - 1) {
-							final String[]	list = args[index+1].split("\\;");
-							final List<URI>	uris = new ArrayList<>();	
-							final Set<URI>	alreadyTyped = new HashSet<>();
-							
-							for (int uriIndex = 0; uriIndex < list.length; uriIndex++) {
-								try{final URI	newUri = URI.create(list[uriIndex]); 
-									
-									if (!alreadyTyped.contains(newUri)) {
-										uris.add(newUri);
-									}
-									alreadyTyped.add(newUri);
-								} catch (IllegalArgumentException exc) {
-									throw new CommandLineParametersException("URI to crowl ["+list[uriIndex]+"] has invalid format!");
-								}
-							}
-							
-							if (expandCrowlingList && parm.crowlingDir != null) {
-								for (URI item : parm.crowlingDir) {
-									if (!alreadyTyped.contains(item)) {
-										uris.add(item);
-									}
-									alreadyTyped.add(item);
-								}
-							}
-							
-							parm.crowlingDir = uris.toArray(new URI[uris.size()]);
-							index++;
-						}
-						else {
-							throw new CommandLineParametersException("Crowling URIs list is missing for '-crowling' key!");
-						}
-						break;
-					case PARM_NOCROWLING	:
-						parm.crowlingDir = null;
-						break;
-					case PARM_REFRESH	:
-						parm.refresh = true;
-						break;
-					case PARM_NOSCREEN	:
-						parm.screen = false;
-						break;
-					case PARM_HELP		:
-						printUsage();
-						break;
-					default :
-						throw new CommandLineParametersException("Unknown command line parameter ["+args[index]+"]!");
-				}
-			}
-			return parm;
+			final File	mapDir = File.createTempFile("map", ".tmp");
+
+			Utils.deleteDir(mapDir);
+			return new MMapDirectory(mapDir.toPath()); 
 		}
 	}
 	
 
+	
+	
 	/**
 	 * <p>Start application</p>
 	 * @param args:
 	 * 		[-conf <configuration_file>] - configuration file to get parameters from
 	 * 		[-index <lucene_index_dir>] - use lucene index directory for searching purposes. If missing, in-memory index will be used 
-	 * 		[-crowling <crowling_dir_URI;...>] - crowling the given directory list 
-	 * 		[+crowling <crowling_dir_URI;...>] - crowling the given directory list in additional to configuration list 
-	 * 		[-refresh] - refresh existent indexes 
+	 * 		[-nocrowling] - down't make crowling 
+	 * 		[-crowling <crowling_dir_URI;...>] - create new index and crowling the given directory list 
+	 * 		[-append <crowling_dir_URI;...>] - append content to existent index 
 	 * 		[-noscreen] - crowl data, but don't start screen application 
 	 * 		[-help] - get help 
 	 */
-	public static void main(String[] args) throws IOException, ParseException {
-		try{final Parameters		parm = parseParameters(args);
-			final StandardAnalyzer 	analyzer = new StandardAnalyzer();
-			final Directory 		index = parm.inMemory ? new RAMDirectory() : FSDirectory.open(parm.luceneDir.toPath());
-			final MainFrame			frame = new MainFrame(CAPTION,index,analyzer);
-
-			if (parm.refresh || parm.inMemory) {
-				frame.buildIndex(new File("d:/JCW"));
-			}
-		} catch (CommandLineParametersException exc) {
-			System.err.println(exc.getMessage());
+	public static void main(String[] args) {
+		if (args.length == 0) {
 			printUsage();
 			System.exit(128);
 		}
+		else {
+			try{final ArgParser	parsed = new ApplicationArgParser().parse(args);
+				
+				if (checkParameters(parsed)) {
+					try(final Directory 					index = getLuceneDir(parsed)) {
+						
+						if (parsed.isTyped(KEY_CROWLING)) {
+							LuceneSearchRepository.prepareDirectory(index);
+						}
+						
+						try(final LuceneSearchRepository	lsr = new LuceneSearchRepository(PureLibSettings.CURRENT_LOGGER, index)) {
+							if (!parsed.getValue(KEY_NOCROWLING, boolean.class)) {
+								if (parsed.isTyped(KEY_CROWLING)) {
+									appendContent(lsr, parsed.getValue(KEY_CROWLING, String[].class), false);
+								}
+								if (parsed.isTyped(KEY_APPEND)) {
+									appendContent(lsr, parsed.getValue(KEY_APPEND, String[].class), true);
+								}
+							}
+							
+							if (!parsed.getValue(KEY_NOSCREEN, boolean.class)) {
+								showContent(lsr);
+							}
+						}
+					} catch (IOException | SearchRepositoryException exc) {
+						System.err.println(exc.getMessage());
+						System.exit(128);
+					}
+				}
+			} catch (CommandLineParametersException exc) {
+				System.err.println(exc.getMessage());
+				printUsage();
+				System.exit(128);
+			}
+		}
+	}
+
+	static class ApplicationArgParser extends ArgParser {
+		private static final ArgParser.AbstractArg[]	KEYS = {
+															new ConfigArg(KEY_CONF, false, false, "location of the config file"),
+															new FileArg(KEY_INDEX, false, false, "location of the lucene index directory"),
+															new BooleanArg(KEY_NOCROWLING, false, false, "don't crowl any data"),
+															new StringListArg(KEY_CROWLING, false, false, "list of directories for crowling"),
+															new StringListArg(KEY_APPEND, false, false, "list of directories to crowl and add to index"),
+															new BooleanArg(KEY_NOSCREEN, false, false, "don't show walking screen"),
+															new BooleanArg(KEY_HELP, false, false, "get help about application"),
+														};
+		
+		ApplicationArgParser() {
+			super(KEYS);
+		}
 	}
 	
-	public static class Parameters {
-		boolean		inMemory = true;
-		File		luceneDir = null;
-		boolean		crowling = false;
-		URI[]		crowlingDir = null;
-		boolean		refresh = false;
-		boolean		screen = true;
+	private static class NameAndId {
+		private final String	name;
+		private final UUID		id;
 		
+		private NameAndId(final String name, final UUID id)  {
+			this.name = name;
+			this.id = id;
+		}
+
 		@Override
 		public String toString() {
-			return "Parameters [inMemory=" + inMemory + ", luceneDir=" + luceneDir + ", crowling=" + crowling + ", crowlingDir=" + Arrays.toString(crowlingDir) + ", refresh=" + refresh + ", screen=" + screen + "]";
-		}
-
-		@Override
-		public int hashCode() {
-			final int prime = 31;
-			int result = 1;
-			
-			result = prime * result + (crowling ? 1231 : 1237);
-			result = prime * result + Arrays.hashCode(crowlingDir);
-			result = prime * result + (inMemory ? 1231 : 1237);
-			result = prime * result + ((luceneDir == null) ? 0 : luceneDir.hashCode());
-			result = prime * result + (refresh ? 1231 : 1237);
-			result = prime * result + (screen ? 1231 : 1237);
-			return result;
-		}
-
-		@Override
-		public boolean equals(Object obj) {
-			if (this == obj) return true;
-			if (obj == null) return false;
-			if (getClass() != obj.getClass()) return false;
-			Parameters other = (Parameters) obj;
-			if (crowling != other.crowling) return false;
-			if (!Arrays.equals(crowlingDir, other.crowlingDir)) return false;
-			if (inMemory != other.inMemory) return false;
-			if (luceneDir == null) {
-				if (other.luceneDir != null) return false;
-			} else if (!luceneDir.equals(other.luceneDir)) return false;
-			if (refresh != other.refresh) return false;
-			if (screen != other.screen) return false;
-			return true;
+			return "NameAndId [name=" + name + ", id=" + id + "]";
 		}
 	}
 }

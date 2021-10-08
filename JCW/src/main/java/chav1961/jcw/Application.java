@@ -28,8 +28,12 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.MMapDirectory;
 
 import chav1961.bt.lucenewrapper.LuceneSearchRepository;
+import chav1961.bt.lucenewrapper.SimpleDocument2Save;
 import chav1961.bt.lucenewrapper.interfaces.Document2Save;
 import chav1961.bt.lucenewrapper.interfaces.SearchRepository.SearchRepositoryTransaction;
+import chav1961.jcw.interfaces.TokenSort;
+import chav1961.jcw.parsers.JavaCodeParser;
+import chav1961.jcw.parsers.TokenDescriptor;
 import chav1961.bt.lucenewrapper.interfaces.SearchRepositoryException;
 import chav1961.bt.lucenewrapper.interfaces.SearchableDocument;
 import chav1961.purelib.basic.ArgParser;
@@ -98,7 +102,7 @@ public class Application {
 		return true;
 	}
 	
-	static void appendContent(final LuceneSearchRepository lsr, final String[] filesAndDirs, final boolean checkReplacement) throws IOException, SearchRepositoryException {
+	static void appendContent(final LuceneSearchRepository lsr, final String[] filesAndDirs, final boolean checkReplacement) throws IOException, SearchRepositoryException, SyntaxException {
 		final List<Document2Save>		docs = new ArrayList<>();
 		final Map<String, NameAndId>	replacements = new HashMap<>();
 		
@@ -144,14 +148,16 @@ public class Application {
 		System.err.println("\t -noscreen - index data only, but not show screen");
 	}
 	
-	private static void createDocument(final File source, final List<Document2Save> docs) throws IOException {
+	private static void createDocument(final File source, final List<Document2Save> docs) throws IOException, SyntaxException {
 		if (source.exists()) {
 			if (source.isFile()) {
-				try(final Reader		rdr = new FileReader(source, Charset.forName(PureLibSettings.DEFAULT_CONTENT_ENCODING))) {
-					final Document2Save	d2s = parseDocument(rdr); 
-					
-					if (d2s != null) {
-						docs.add(d2s);
+				if (source.getName().endsWith(".java")) {
+					try(final Reader		rdr = new FileReader(source, Charset.forName(PureLibSettings.DEFAULT_CONTENT_ENCODING))) {
+						final Document2Save	d2s = parseDocument(rdr); 
+						
+						if (d2s != null) {
+							docs.add(d2s);
+						}
 					}
 				}
 			}
@@ -163,8 +169,17 @@ public class Application {
 		}
 	}
 	
-	private static Document2Save parseDocument(final Reader rdr) {
-		return null;
+	private static Document2Save parseDocument(final Reader rdr) throws SyntaxException, IOException {
+		final JavaCodeParser		jcp = new JavaCodeParser(rdr);
+		final SimpleDocument2Save	sd2s = new SimpleDocument2Save();
+		
+		sd2s.setTitle("sss");
+		sd2s.setText(jcp.getContent());
+		
+		for (TokenDescriptor token : jcp) {
+			System.err.println(token);
+		}
+		return sd2s;
 	}
 
 	private static void showContent(final LuceneSearchRepository lsr) {
@@ -183,9 +198,6 @@ public class Application {
 			return new MMapDirectory(mapDir.toPath()); 
 		}
 	}
-	
-
-	
 	
 	/**
 	 * <p>Start application</p>
@@ -227,7 +239,7 @@ public class Application {
 								showContent(lsr);
 							}
 						}
-					} catch (IOException | SearchRepositoryException exc) {
+					} catch (IOException | SyntaxException | SearchRepositoryException exc) {
 						System.err.println(exc.getMessage());
 						System.exit(128);
 					}
